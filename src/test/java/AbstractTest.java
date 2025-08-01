@@ -58,7 +58,6 @@ public class AbstractTest {
 
 
     @Test
-    @Ignore
     public void testAllStepsInSingleInstance() throws IOException {
         CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance();
         instance.simpleSetup();
@@ -132,7 +131,6 @@ public class AbstractTest {
 
 
     @Test
-    @Ignore
     public void testFirstStepOnly() throws IOException {
         CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance();
         instance.simpleSetup();
@@ -153,7 +151,6 @@ public class AbstractTest {
 
 
     @Test
-    @Ignore
     public void testEachStepInSeparateInstance() throws IOException {
         double t = getTime(0);
         double stepSize = 0.5;
