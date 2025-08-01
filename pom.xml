@@ -7,8 +7,8 @@
     <packaging>jar</packaging>
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
-        <maven.compiler.source>19</maven.compiler.source>
-        <maven.compiler.target>19</maven.compiler.target>
+        <maven.compiler.source>21</maven.compiler.source>
+        <maven.compiler.target>21</maven.compiler.target>
         <exec.mainClass>eu.modapto.fmutest.FmuTest</exec.mainClass>
         <fmi4j.version>0.38.0</fmi4j.version>        
         <slf4j.ext.version>1.0.0-jdk6</slf4j.ext.version>

@@ -1,0 +1,3 @@
+time,Float64_continuous_input,Float64_discrete_input,Int32_input,Boolean_input,String_input
+0,1.1,2.1,1,true,"Hello, world!"
+0.5,1.2,2.2,2,false,"Goodbye, world!"
