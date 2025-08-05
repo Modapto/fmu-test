@@ -53,13 +53,13 @@ def setValues(instance, model_description, inputs):
 def setValue(instance, model_description, name, value):
     variable = variable_by_name(model_description, name)
     if variable.type == 'Real':
-        instance.setReal([variable.valueReference], [value])
+        instance.setReal([variable.valueReference], [convert(variable.type, value)])
     elif variable.type == 'Integer':
-        instance.setInteger([variable.valueReference], [value])
+        instance.setInteger([variable.valueReference], [convert(variable.type, value)])
     elif variable.type == 'Boolean':
-        instance.setBoolean([variable.valueReference], [value])
+        instance.setBoolean([variable.valueReference], [convert(variable.type, value)])
     elif variable.type == 'String':
-        instance.setString([variable.valueReference], [value])
+        instance.setString([variable.valueReference], [convert(variable.type, value)])
     else:
         print(f'Unknown type for variable: {variable.name}')
 
@@ -90,8 +90,8 @@ def main(fmu_file, input_file, validation_file, init_file=None):
     model_description = read_model_description(fmu_file)
     unzipdir = extract(fmu_file)
 
-    for i in range(2):
-        print(f'starting run #{i}...')
+    for i in range(10):
+        print(f'starting run #{i+1}...')
         t = 0.0
         stepSize = 0.5
         instance = FMU2Slave(guid=model_description.guid,
@@ -135,5 +135,7 @@ def main(fmu_file, input_file, validation_file, init_file=None):
         instance.freeInstance()
 
 if __name__ == "__main__":
-    main('Feedthrough.fmu', 'Feedthrough_in.csv', 'Feedthrough_out.csv')
+    #main('Feedthrough.fmu', 'Feedthrough_in.csv', 'Feedthrough_out.csv')
     #main('eks.fmu', 'eks_in.csv', 'eks_out.csv', 'eks.properties')
+    main('modapto-ecm-electric.fmu', 'modapto-ecm-electric_in.csv', 'modapto-ecm-electric_out.csv', 'modapto-ecm-electric.properties')
+    #main('modapto-ecm-mechanic.fmu', 'modapto-ecm-mechanic_in.csv', 'modapto-ecm-mechanic_out.csv', 'modapto-ecm-mechanic.properties')
