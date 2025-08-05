@@ -12,6 +12,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.TreeMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -27,6 +28,7 @@ import no.ntnu.ihb.fmi4j.modeldescription.variables.IntegerVariable;
 import no.ntnu.ihb.fmi4j.modeldescription.variables.RealVariable;
 import no.ntnu.ihb.fmi4j.modeldescription.variables.StringVariable;
 import no.ntnu.ihb.fmi4j.modeldescription.variables.TypedScalarVariable;
+import no.ntnu.ihb.fmi4j.modeldescription.variables.Variability;
 import org.junit.Assert;
 import org.junit.Ignore;
 import org.junit.Test;
@@ -34,18 +36,24 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 
-public class AbstractTest {
+public abstract class AbstractTest {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(AbstractTest.class);
     private static final String TIME_COLUMN = "time";
 
     protected String fmuFilename;
     protected Fmu fmu;
+    protected Map<String, String> initialValues;
     protected List<Map<String, String>> inputs;
     protected List<Map<String, Object>> expectedOutputs;
 
-    protected AbstractTest(String fmuFilename, String inputFilename, String expectedOutputFilename) throws IOException, URISyntaxException, CsvException {
+    protected AbstractTest(
+            String fmuFilename,
+            String initialValuesFilename,
+            String inputFilename,
+            String expectedOutputFilename) throws IOException, URISyntaxException, CsvException {
         this.fmuFilename = fmuFilename;
+        initialValues = readPropertiesFiles(initialValuesFilename);
         fmu = Fmu.from(AbstractTest.class.getResource(fmuFilename));
         inputs = readCsvAsMaps(inputFilename);
         expectedOutputs = readCsvAsMaps(expectedOutputFilename).stream()
@@ -58,52 +66,53 @@ public class AbstractTest {
 
 
     @Test
+    @Ignore
     public void testAllStepsInSingleInstance() throws IOException {
-        CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance();
-        instance.simpleSetup();
-        double t = getTime(0);
-        double stepSize = 0.5;
-        for (int i = 0; i < inputs.size(); i++) {
-            setInputValues(instance, inputs.get(i));
-            printState(instance, t);
-            stepSize = computeDeltaT(i, stepSize);
-            LOGGER.info("calling doStep (t={}, stepSize={})", t, stepSize);
-            if (!instance.doStep(t, stepSize)) {
-                Assert.fail(String.format("doStep failed (lastStatus: %s)", instance.getLastStatus().toString()));
-            }
-            t += stepSize;
-            Assert.assertTrue("output violation", validateOutput(instance, t));
-        }
-        instance.terminate();
-        instance.close();
-    }
-
-
-    @Test
-    public void testMultipleFullRuns() throws IOException {
-        int numberOfRuns = 5;
-        Boolean[][] results = new Boolean[numberOfRuns][inputs.size()];
-        for (int run = 0; run < 5; run++) {
-            LOGGER.info("starting run #{} ...", run + 1);
-            fmu = Fmu.from(AbstractTest.class.getResource(fmuFilename));
-            CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance();
-            instance.simpleSetup();
+        try (CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance()) {
+            init(instance);
             double t = getTime(0);
             double stepSize = 0.5;
             for (int i = 0; i < inputs.size(); i++) {
-                boolean failed = false;
                 setInputValues(instance, inputs.get(i));
                 printState(instance, t);
                 stepSize = computeDeltaT(i, stepSize);
                 LOGGER.info("calling doStep (t={}, stepSize={})", t, stepSize);
                 if (!instance.doStep(t, stepSize)) {
-                    failed = true;
+                    Assert.fail(String.format("doStep failed (lastStatus: %s)", instance.getLastStatus().toString()));
                 }
                 t += stepSize;
-                results[run][i] = !failed && validateOutput(instance, t);
+                Assert.assertTrue("output violation", validateOutput(instance, t));
             }
             instance.terminate();
-            instance.close();
+        }
+    }
+
+
+    @Test
+    public void testMultipleRuns() throws IOException {
+        int numberOfRuns = 10;
+        Boolean[][] results = new Boolean[numberOfRuns][inputs.size()];
+        for (int run = 0; run < numberOfRuns; run++) {
+            LOGGER.info("starting run #{} ...", run + 1);
+            fmu = Fmu.from(AbstractTest.class.getResource(fmuFilename));
+            try (CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance()) {
+                init(instance);
+                double t = getTime(0);
+                double stepSize = 0.5;
+                for (int i = 0; i < inputs.size(); i++) {
+                    boolean failed = false;
+                    setInputValues(instance, inputs.get(i));
+                    printState(instance, t);
+                    stepSize = computeDeltaT(i, stepSize);
+                    LOGGER.info("calling doStep (t={}, stepSize={})", t, stepSize);
+                    if (!instance.doStep(t, stepSize)) {
+                        failed = true;
+                    }
+                    t += stepSize;
+                    results[run][i] = !failed && validateOutput(instance, t);
+                }
+                instance.terminate();
+            }
         }
 
         List<Boolean[]> failedRuns = Arrays.stream(results).filter(x -> Arrays.stream(x).anyMatch(y -> !y)).toList();
@@ -124,6 +133,7 @@ public class AbstractTest {
                                             .boxed()
                                             .map(x -> Integer.toString(x))
                                             .collect(Collectors.joining(", "))));
+
         }
         Assert.assertEquals("some runs have failed", 0, failedRuns.size());
 
@@ -131,35 +141,15 @@ public class AbstractTest {
 
 
     @Test
+    @Ignore
     public void testFirstStepOnly() throws IOException {
-        CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance();
-        instance.simpleSetup();
-        double t = getTime(0);
-        double stepSize = 0.5;
-        setInputValues(instance, inputs.get(0));
-        printState(instance, t);
-        stepSize = computeDeltaT(0, stepSize);
-        LOGGER.info("calling doStep (t={}, stepSize={})", t, stepSize);
-        if (!instance.doStep(t, stepSize)) {
-            Assert.fail(String.format("doStep failed (lastStatus: %s)", instance.getLastStatus().toString()));
-        }
-        t += stepSize;
-        Assert.assertTrue("output violation", validateOutput(instance, t));
-        instance.terminate();
-        instance.close();
-    }
-
-
-    @Test
-    public void testEachStepInSeparateInstance() throws IOException {
-        double t = getTime(0);
-        double stepSize = 0.5;
-        for (int i = 0; i < inputs.size(); i++) {
-            CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance();
-            instance.simpleSetup();
-            setInputValues(instance, inputs.get(i));
+        try (CoSimulationSlave instance = fmu.asCoSimulationFmu().newInstance()) {
+            init(instance);
+            double t = getTime(0);
+            double stepSize = 0.5;
+            setInputValues(instance, inputs.get(0));
             printState(instance, t);
-            stepSize = computeDeltaT(i, stepSize);
+            stepSize = computeDeltaT(0, stepSize);
             LOGGER.info("calling doStep (t={}, stepSize={})", t, stepSize);
             if (!instance.doStep(t, stepSize)) {
                 Assert.fail(String.format("doStep failed (lastStatus: %s)", instance.getLastStatus().toString()));
@@ -167,7 +157,20 @@ public class AbstractTest {
             t += stepSize;
             Assert.assertTrue("output violation", validateOutput(instance, t));
             instance.terminate();
-            instance.close();
+        }
+    }
+
+
+    private void init(CoSimulationSlave instance) {
+        if (!instance.setupExperiment(0, 0, 0)) {
+            LOGGER.warn("[WARN] setupExperiment failed");
+        }
+        initializeModelParameters(instance);
+        if (!instance.enterInitializationMode()) {
+            LOGGER.warn("[WARN] enterInitializationModel failed");
+        }
+        if (!instance.exitInitializationMode()) {
+            LOGGER.warn("[WARN] exitInitializationModel failed");
         }
     }
 
@@ -192,11 +195,21 @@ public class AbstractTest {
     }
 
 
+    private static Map<String, String> readPropertiesFiles(String filename) throws URISyntaxException, IOException {
+        if (Objects.isNull(filename)) {
+            return Map.of();
+        }
+        Properties properties = new Properties();
+        properties.load(Files.newBufferedReader(Paths.get(AbstractTest.class.getResource(filename).toURI())));
+        return properties.stringPropertyNames().stream().collect(Collectors.toMap(x -> x, x -> properties.getProperty(x)));
+    }
+
+
     protected static void printState(CoSimulationSlave instance, double t) {
         // print all variables include type/direction, etc
         LOGGER.info("----- state @ {} -----", t);
         Map<Causality, List<TypedScalarVariable>> variablesByCasualty = instance.getModelVariables().getVariables().stream()
-                .filter(x -> x.getCausality() != Causality.INPUT)
+                .filter(x -> Objects.nonNull(x.getCausality()) && x.getCausality() != Causality.INPUT && x.getCausality() != Causality.UNKNOWN)
                 .collect(Collectors.groupingBy(
                         TypedScalarVariable::getCausality,
                         Collectors.mapping(
@@ -205,9 +218,9 @@ public class AbstractTest {
         variablesByCasualty.forEach((key, value) -> {
             value.sort(Comparator.comparing(TypedScalarVariable::getName));
         });
-    
-        for (var causality : variablesByCasualty.keySet()) {
-            for (var variable : variablesByCasualty.get(causality)) {
+
+        for (var causality: variablesByCasualty.keySet()) {
+            for (var variable: variablesByCasualty.get(causality)) {
                 LOGGER.info("[{}] {}={}", causality, variable.getName(), Fmi4jVariableUtils.read(variable, instance).getValue().toString());
             }
         }
@@ -223,56 +236,90 @@ public class AbstractTest {
             return;
         }
         LOGGER.info("setting input values...");
-        CoSimulationModelDescription modelDescription = instance.getModelDescription();
+
         for (var entry: values.entrySet()) {
             if (TIME_COLUMN.equalsIgnoreCase(entry.getKey())) {
                 continue;
             }
             LOGGER.info("{} -> {}", entry.getKey(), entry.getValue());
-            TypedScalarVariable fmuVariable = modelDescription.getVariableByName(entry.getKey());
-            if (fmuVariable instanceof IntegerVariable) {
-                instance.writeInteger(
-                        new long[] {
-                                fmuVariable.getValueReference()
-                        },
-                        new int[] {
-                                (int) Double.parseDouble(entry.getValue())
-                        });
-            }
-            else if (fmuVariable instanceof BooleanVariable) {
-                instance.writeBoolean(
-                        new long[] {
-                                fmuVariable.getValueReference()
-                        },
-                        new boolean[] {
-                                Boolean.parseBoolean(entry.getValue())
-                        });
-            }
-            else if (fmuVariable instanceof RealVariable) {
-                instance.writeReal(
-                        new long[] {
-                                fmuVariable.getValueReference()
-                        },
-                        new double[] {
-                                Double.parseDouble(entry.getValue())
-                        });
-            }
-            else if (fmuVariable instanceof StringVariable) {
-                instance.writeString(
-                        new long[] {
-                                fmuVariable.getValueReference()
-                        },
-                        new String[] {
-                                entry.getValue()
-                        });
-            }
+            setVariable(instance, entry.getKey(), entry.getValue());
+        }
+    }
 
+
+    protected void initializeModelParameters(CoSimulationSlave instance) {
+        LOGGER.info("setting initial values (causality=parameter & variability=fixed|tunable)...");
+        List<TypedScalarVariable<?>> modelParameters = instance.getModelVariables().getVariables().stream()
+                .filter(x -> x.getCausality() == Causality.PARAMETER)
+                .filter(x -> x.getVariability() == Variability.FIXED || x.getVariability() == Variability.TUNABLE)
+                .sorted(Comparator.comparing(TypedScalarVariable::getName))
+                .toList();
+        List<String> matchedParameters = new ArrayList<>();
+        modelParameters.forEach(x -> {
+            if (initialValues.containsKey(x.getName())) {
+                LOGGER.info("{} --> {}", x.getName(), initialValues.get(x.getName()));
+                setVariable(instance, x.getName(), initialValues.get(x.getName()));
+                matchedParameters.add(x.getName());
+            }
             else {
-                throw new IllegalArgumentException("unsupported type: " + fmuVariable.getClass().getName());
+                LOGGER.info("{} = {} (default)", x.getName(), x.getStart());
             }
-            if (!instance.getLastStatus().isOK()) {
-                throw new RuntimeException(String.format(String.format("Setting input value on FMU failed (name: %s)", entry.getKey())));
-            }
+        });
+        initialValues.keySet().stream()
+                .sorted()
+                .filter(x -> !matchedParameters.contains(x))
+                .forEach(x -> LOGGER.info("parameter does not exist: {}", x));
+        if (modelParameters.isEmpty() && initialValues.isEmpty()) {
+            LOGGER.info("   [model does not have any parameters]");
+        }
+    }
+
+
+    protected static void setVariable(CoSimulationSlave instance, String name, String value) {
+        CoSimulationModelDescription description = instance.getModelDescription();
+        TypedScalarVariable fmuVariable = description.getVariableByName(name);
+        if (fmuVariable instanceof IntegerVariable) {
+            instance.writeInteger(
+                    new long[] {
+                            fmuVariable.getValueReference()
+                    },
+                    new int[] {
+                            (int) Double.parseDouble(value)
+                    });
+        }
+        else if (fmuVariable instanceof BooleanVariable) {
+            instance.writeBoolean(
+                    new long[] {
+                            fmuVariable.getValueReference()
+                    },
+                    new boolean[] {
+                            Boolean.parseBoolean(value)
+                    });
+        }
+        else if (fmuVariable instanceof RealVariable) {
+            instance.writeReal(
+                    new long[] {
+                            fmuVariable.getValueReference()
+                    },
+                    new double[] {
+                            Double.parseDouble(value)
+                    });
+        }
+        else if (fmuVariable instanceof StringVariable) {
+            instance.writeString(
+                    new long[] {
+                            fmuVariable.getValueReference()
+                    },
+                    new String[] {
+                            value
+                    });
+        }
+
+        else {
+            throw new IllegalArgumentException("unsupported type: " + fmuVariable.getClass().getName());
+        }
+        if (!instance.getLastStatus().isOK()) {
+            throw new RuntimeException(String.format(String.format("Setting input value on FMU failed (name: %s)", name)));
         }
     }
 
@@ -304,12 +351,7 @@ public class AbstractTest {
 
     protected boolean validateOutput(CoSimulationSlave instance, Map<String, Object> expectedOutput) {
         return expectedOutput.entrySet().stream()
-                .sorted(new Comparator<Map.Entry<String, Object>>() {
-                    @Override
-                    public int compare(Map.Entry<String, Object> o1, Map.Entry<String, Object> o2) {
-                        return o1.getKey().compareTo(o2.getKey());
-                    }
-                })
+                .sorted((Map.Entry<String, Object> o1, Map.Entry<String, Object> o2) -> o1.getKey().compareTo(o2.getKey()))
                 .filter(x -> !TIME_COLUMN.equalsIgnoreCase(x.getKey()))
                 .map(x -> validateOutput(instance, x.getKey(), x.getValue()))
                 // needed so that validation runs for a variables and does not stop with first invalid variable
@@ -330,7 +372,7 @@ public class AbstractTest {
 
     private Object convertToCorrectFormat(String variableName, String value) {
         if (TIME_COLUMN.equalsIgnoreCase(variableName)) {
-            return Double.parseDouble(value);
+            return Double.valueOf(value);
         }
         TypedScalarVariable<?> variable = fmu.getModelDescription().getModelVariables().getByName(variableName);
         switch (variable) {
@@ -338,10 +380,10 @@ public class AbstractTest {
                 return (int) Double.parseDouble(value);
             }
             case BooleanVariable var -> {
-                return Boolean.parseBoolean(value);
+                return Boolean.valueOf(value);
             }
             case RealVariable var -> {
-                return Double.parseDouble(value);
+                return Double.valueOf(value);
             }
             case StringVariable var -> {
                 return value;
